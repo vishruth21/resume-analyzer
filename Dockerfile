@@ -1,6 +1,6 @@
 # Use an official lightweight Python image.
-# 3.9-slim is a good balance of size and compatibility.
-FROM python:3.9-slim
+# 3.11-slim is modern, faster, and standard on Streamlit Cloud.
+FROM python:3.11-slim
 
 # Set working directory
 WORKDIR /app
