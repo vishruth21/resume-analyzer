@@ -118,8 +118,8 @@ def get_llm(api_key: str):
         raise ValueError("Groq API Key is missing. Please check your .env or settings.")
         
     return ChatGroq(
-        # Defaulting to Mixtral, Groq's high-performance standard
-        model_name="mixtral-8x7b-32768", 
+        # User requested specific model: openai/gpt-oss-120b
+        model_name="openai/gpt-oss-120b", 
         temperature=0.0,
         groq_api_key=api_key
     )
