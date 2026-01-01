@@ -1,0 +1,57 @@
+# Deployment Guide: Resume Analyzer
+
+You have two main options for deploying this application.
+
+## Option 1: Streamlit Community Cloud (Easiest & Free)
+Best for personal use or quick sharing.
+
+1.  **Push your code to GitHub**:
+    *   Create a new repository on GitHub.
+    *   Push all files in this folder to that repository.
+    *   *Note: Do NOT push your [.env](file:///Users/vishruthvalandas/sendgrid/resume%20analyzer/.env) file containing secrets! Add [.env](file:///Users/vishruthvalandas/sendgrid/resume%20analyzer/.env) to `.gitignore` first.*
+
+2.  **Deploy**:
+    *   Go to [share.streamlit.io](https://share.streamlit.io/) and log in.
+    *   Click "New app".
+    *   Select your GitHub repository.
+    *   Main file path: [app.py](file:///Users/vishruthvalandas/sendgrid/resume%20analyzer/app.py).
+    *   Click "Deploy".
+
+3.  **Configure Secrets**:
+    *   Once deployed, go to the app's **Settings** -> **Secrets**.
+    *   Paste the contents of your [.env](file:///Users/vishruthvalandas/sendgrid/resume%20analyzer/.env) file there (e.g., `OPENAI_API_KEY=sk-...`).
+    *   Restart the app.
+
+---
+
+## Option 2: Docker (Private & Robust)
+Best for local usage or deploying to cloud providers (AWS, GCP, Azure, DigitalOcean).
+
+I have added a [Dockerfile](file:///Users/vishruthvalandas/sendgrid/resume%20analyzer/Dockerfile) to your project root.
+
+### 1. Build the Image
+Run this in your terminal:
+```bash
+docker build -t resume-analyzer .
+```
+
+### 2. Run the Container
+Replace `your-api-key-here` with your actual key:
+```bash
+docker run -p 8501:8501 -e OPENAI_API_KEY="your-api-key-here" resume-analyzer
+```
+Access the app at `http://localhost:8501`.
+
+### 3. Deploying to Cloud (e.g., AWS/GCP)
+*   **AWS App Runner / Elastic Beanstalk**: Upload the source code (including Dockerfile). It will auto-build and run.
+*   **Google Cloud Run**:
+    ```bash
+    gcloud run deploy resume-analyzer --source .
+    ```
+    (You will need to set the `OPENAI_API_KEY` environmental variable in the cloud console).
+
+---
+
+## Notes
+*   **Dependencies**: I updated [requirements.txt](file:///Users/vishruthvalandas/sendgrid/resume%20analyzer/requirements.txt) to include `python-docx`, which was missing.
+*   **Privacy**: Remember that the app handles sensitive resume data. If you deploy publicly, consider adding basic password protection (Streamlit Secrets can handle strict access too).
