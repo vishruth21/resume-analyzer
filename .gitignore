@@ -1,0 +1,12 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.DS_Store
+dist/
+build/
+*.egg-info/
+resume_analyzer.egg-info/
+optimized_resume.docx
+Cover_Letter.docx
+d.txt

@@ -1,0 +1,487 @@
+import os
+from typing import List, Dict
+import json
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+import pypdf
+import docx2txt
+
+def parse_pdf(file):
+    reader = pypdf.PdfReader(file)
+    text = ""
+    for page in reader.pages:
+        text += page.extract_text()
+    return text
+
+def parse_docx(file):
+    return docx2txt.process(file)
+
+def get_llm(api_key):
+    return ChatOpenAI(
+        model="gpt-4o",
+        openai_api_key=api_key,
+        temperature=0.0
+    )
+
+def analyze_resume(resume_text: str, jd_text: str, api_key: str) -> str:
+    llm = get_llm(api_key)
+    
+    template = """
+    You are an ATS Relevance Analyzer simulating enterprise ATS systems
+(Workday, Greenhouse, iCIMS).
+
+IMPORTANT:
+- ATS systems rank candidates; they do NOT reject for missing preferred skills.
+- Only REQUIRED qualifications can fail a candidate.
+- Preferred skills influence ranking, not eligibility.
+
+TASK:
+Analyze the resume against the Job Description and produce an ATS-style relevance assessment.
+
+Job Description:
+{jd_text}
+
+Resume:
+{resume_text}
+
+OUTPUT VALID JSON ONLY:
+
+{
+  "eligibility_check": {
+    "meets_minimum_requirements": true,
+    "blocking_issues": []
+  },
+  "required_skill_signals_detected": {
+    "primary": [],
+    "secondary": []
+  },
+  "required_skill_gaps": [],
+  "preferred_skill_signals_detected": [],
+  "cloud_alignment": {
+    "primary_cloud_match": "AWS | Azure | Mixed",
+    "serverless_experience": true
+  },
+  "testing_and_delivery_signals": {
+    "automated_testing": true,
+    "ci_cd": true
+  },
+  "noise_or_dilution_signals": [],
+  "overall_relevance_score": 0,
+  "ats_ranking_band": "Medium | High | Very High",
+  "recruiter_summary": ""
+}
+
+Classify required skills into:
+- primary: core language, cloud platform, architecture
+- secondary: testing, CI/CD, delivery practices.
+
+
+RULES:
+- Do NOT suggest adding experience.
+- Do NOT call preferred skills 'missing'.
+- Do NOT rewrite the resume.
+    """
+    
+    prompt = PromptTemplate(
+        input_variables=["resume_text", "jd_text"],
+        template=template
+    )
+    
+    # Use LCEL: Prompt -> LLM -> OutputParser
+    chain = prompt | llm | StrOutputParser()
+    
+    response = chain.invoke({"resume_text": resume_text, "jd_text": jd_text})
+    
+    # Clean up potentially messy JSON output if the model adds markdown
+    response_text = response.strip()
+    if response_text.startswith("```json"):
+        response_text = response_text[7:]
+    if response_text.endswith("```"):
+        response_text = response_text[:-3]
+        
+    return response_text
+
+def rewrite_resume(current_resume: str, jd_text: str, emphasize_skills: List[str], deemphasize_skills: List[str], api_key: str) -> str:
+    llm = get_llm(api_key)
+    
+    template = """
+     You are a Resume Optimizer tuned to enterprise ATS ranking behavior.
+
+IMPORTANT:
+- ATS systems reward clarity, relevance, and keyword-context alignment.
+- They penalize noise and over-broad stacks.
+- They do NOT require adding new skills.
+
+EMPHASIS PRIORITY RULES:
+- Primary required skills MUST appear in:
+  • Professional Summary
+  • First bullet of the most recent role
+- Secondary skills may appear in later bullets
+- Skills not listed above must not be introduced
+
+
+NON-NEGOTIABLE RULES:
+1. Preserve resume structure, companies, titles, and dates exactly.
+2. Maintain 6–7 bullet points per role.
+3. Do NOT invent experience or tools.
+4. Do NOT add technologies not already present.
+5. Optimize by rewording, reordering emphasis, and removing dilution.
+
+Job Description:
+{jd_text}
+
+Original Resume:
+{resume_text}
+
+Emphasize These Existing Signals:
+{emphasize_skills}
+
+De-emphasize or down-rank These Signals:
+{deemphasize_skills}
+
+TASK:
+Rewrite the resume to improve ATS ranking for THIS role while preserving senior credibility.
+
+OUTPUT:
+- Full resume
+- Plain text
+- No JSON
+- No explanations
+
+
+"""
+    
+    prompt = PromptTemplate(
+        input_variables=["resume_text", "jd_text", "emphasize_skills", "deemphasize_skills"],
+        template=template
+    )
+    
+    chain = prompt | llm | StrOutputParser()
+    raw_output = chain.invoke({
+        "resume_text": current_resume, 
+        "jd_text": jd_text,
+        "emphasize_skills": ", ".join(emphasize_skills),
+        "deemphasize_skills": ", ".join(deemphasize_skills)
+    })
+
+    print(f"DEBUG RAW OUTPUT:\n{raw_output[:500]}...\n") # Debugging print
+
+    # Clean up formatting artifacts if any
+    final_resume_text = raw_output.strip()
+    
+    # Simple regex cleanup for potential separators
+    import re
+    final_resume_text = re.sub(r'={10,}', '', final_resume_text)
+    if len(final_resume_text.splitlines()) < 20:
+        raise RuntimeError("Rewrite failed: resume output too short")
+
+    return final_resume_text
+
+def create_pdf(text_content: str, filename: str):
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import simpleSplit
+    
+    c = canvas.Canvas(filename, pagesize=letter)
+    width, height = letter
+    margin = 40
+    y_position = height - margin
+    
+    # Font settings
+    font_name = "Helvetica"
+    font_size = 10
+    line_height = 12
+    
+    c.setFont(font_name, font_size)
+    
+    # Split the input text by newlines carefully to preserve structure
+    raw_lines = text_content.split('\n')
+    
+    for line in raw_lines:
+        # Check for page break
+        if y_position < margin:
+            c.showPage()
+            y_position = height - margin
+            c.setFont(font_name, font_size)
+            
+        clean_line = line.strip()
+        c.setFont("Helvetica", 10)
+            
+        # Draw the text, wrapping if necessary
+        # We respect the original indentation for bullet points
+        indent = 0
+        if line.startswith(" ") or line.startswith("\t") or line.strip().startswith("-") or line.strip().startswith("•"):
+             indent = 20
+
+        # Wrap text if it triggers width limit
+        available_width = width - (2 * margin) - indent
+        wrapped_lines = simpleSplit(clean_line, c._fontname, c._fontsize, available_width)
+        
+        if not wrapped_lines: # Empty line
+             y_position -= line_height
+             continue
+
+        for wrapped_line in wrapped_lines:
+            if y_position < margin:
+                c.showPage()
+                y_position = height - margin
+                c.setFont(font_name, font_size)
+            
+            c.drawString(margin + indent, y_position, wrapped_line)
+            y_position -= line_height
+            
+    c.save()
+    return filename
+
+
+
+import os
+import json
+from typing import List, Dict
+
+import pypdf
+import docx2txt
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import StrOutputParser
+
+
+# =========================================================
+# FILE PARSERS
+# =========================================================
+
+def parse_pdf(file) -> str:
+    reader = pypdf.PdfReader(file)
+    text = []
+    for page in reader.pages:
+        t = page.extract_text()
+        if t:
+            text.append(t)
+    return "\n".join(text).strip()
+
+
+def parse_docx(file) -> str:
+    return docx2txt.process(file).strip()
+
+
+# =========================================================
+# LLM
+# =========================================================
+
+def get_llm(api_key: str) -> ChatOpenAI:
+    return ChatOpenAI(
+        model="gpt-4o",
+        openai_api_key=api_key,
+        temperature=0.0
+    )
+
+
+# =========================================================
+# ATS ANALYZER (ROLE-INTENT AWARE)
+# =========================================================
+
+def analyze_resume(resume_text: str, jd_text: str, api_key: str) -> Dict:
+    llm = get_llm(api_key)
+
+    prompt = """
+You are simulating a REAL enterprise ATS ranking system
+(Workday, Greenhouse, iCIMS).
+
+ABSOLUTE RULES:
+• ATS systems RANK, they do not "compensate"
+• Preferred skills NEVER override role intent
+• Overqualification causes ranking normalization
+• Role mismatch causes ranking penalty
+• Do NOT rewrite or suggest changes
+
+PRIMARY QUESTION:
+Is this resume INTENTIONALLY aligned to THIS role?
+
+JOB DESCRIPTION:
+{jd_text}
+
+RESUME:
+{resume_text}
+
+OUTPUT VALID JSON ONLY:
+
+{{
+  "eligibility_check": {{
+    "meets_minimum_requirements": true,
+    "blocking_issues": []
+  }},
+  "role_intent_alignment": "Low | Medium | High",
+  "required_skill_signals_detected": {{
+    "primary": [],
+    "secondary": []
+  }},
+  "required_skill_gaps": [],
+  "preferred_skill_signals_detected": [],
+  "cloud_alignment": {{
+    "primary_cloud_match": "AWS | Azure | Mixed",
+    "serverless_experience": true
+  }},
+  "testing_and_delivery_signals": {{
+    "automated_testing": true,
+    "ci_cd": true
+  }},
+  "noise_or_dilution_signals": [],
+  "seniority_normalization_penalty": 0,
+  "role_intent_penalty": 0,
+  "overall_relevance_score": 0,
+  "ats_ranking_band": "Low | Medium | High | Very High",
+  "recruiter_summary": ""
+}}
+
+SCORING GUIDANCE:
+• Strong role-intent mismatch = −10 to −15
+• Senior overqualification = −2 to −5
+• Missing preferred skills = no penalty
+• Noise signals = −1 to −3 each
+"""
+
+    chain = PromptTemplate(
+        input_variables=["resume_text", "jd_text"],
+        template=prompt
+    ) | llm | StrOutputParser()
+
+    raw = chain.invoke({
+        "resume_text": resume_text,
+        "jd_text": jd_text
+    })
+
+    cleaned = raw.strip()
+    if cleaned.startswith("```"):
+        cleaned = cleaned.replace("```json", "").replace("```", "").strip()
+
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError as e:
+        raise RuntimeError(f"Analyzer JSON parse failed:\n{cleaned}") from e
+
+
+# =========================================================
+# ATS RESUME REWRITER (INTENT-PRESERVING)
+# =========================================================
+
+def rewrite_resume(
+    resume_text: str,
+    jd_text: str,
+    primary_skills: List[str],
+    secondary_skills: List[str],
+    noise_skills: List[str],
+    role_intent: str,
+    api_key: str
+) -> str:
+
+    llm = get_llm(api_key)
+
+    prompt = """
+You are a Resume Optimizer tuned to ATS ranking behavior.
+
+THIS IS A CONTROLLED REWRITE.
+
+HARD CONSTRAINTS:
+1. Preserve structure, companies, titles, dates EXACTLY
+2. 8-9 bullets per role use (•) for each bullet
+3. No invented experience
+4. No new technologies
+5. No exaggeration
+6. Preserve senior credibility
+
+INTENT RULES:
+• Resume MUST clearly read as INTENTIONALLY aligned to THIS role
+• Primary skills dominate summary and first bullets
+• Secondary skills appear later
+• Noise skills are pushed down or removed
+• Do NOT convert backend engineers into marketers
+
+JOB DESCRIPTION:
+{jd_text}
+
+ROLE INTENT TARGET:
+{role_intent}
+
+ORIGINAL RESUME:
+{resume_text}
+
+PRIMARY REQUIRED SKILLS:
+{primary_skills}
+
+SECONDARY REQUIRED SKILLS:
+{secondary_skills}
+
+SKILLS TO DE-EMPHASIZE:
+{noise_skills}
+
+OUTPUT:
+Resume text only
+"""
+
+    chain = PromptTemplate(
+        input_variables=[
+            "resume_text",
+            "jd_text",
+            "primary_skills",
+            "secondary_skills",
+            "noise_skills",
+            "role_intent"
+        ],
+        template=prompt
+    ) | llm | StrOutputParser()
+
+    rewritten = chain.invoke({
+        "resume_text": resume_text,
+        "jd_text": jd_text,
+        "primary_skills": ", ".join(primary_skills),
+        "secondary_skills": ", ".join(secondary_skills),
+        "noise_skills": ", ".join(noise_skills),
+        "role_intent": role_intent
+    }).strip()
+
+    if len(rewritten.splitlines()) < 25:
+        raise RuntimeError("Rewrite failed: output too short")
+
+    return rewritten
+
+
+# =========================================================
+# PDF GENERATOR
+# =========================================================
+
+def create_pdf(text_content: str, filename: str):
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib.utils import simpleSplit
+
+    c = canvas.Canvas(filename, pagesize=letter)
+    width, height = letter
+    margin = 40
+    y = height - margin
+    c.setFont("Helvetica", 10)
+
+    for line in text_content.split("\n"):
+        if y < margin:
+            c.showPage()
+            c.setFont("Helvetica", 10)
+            y = height - margin
+
+        indent = 20 if line.strip().startswith("•") else 0
+        wrapped = simpleSplit(
+            line.strip(),
+            "Helvetica",
+            10,
+            width - (2 * margin) - indent
+        )
+
+        for w in wrapped:
+            if y < margin:
+                c.showPage()
+                c.setFont("Helvetica", 10)
+                y = height - margin
+            c.drawString(margin + indent, y, w)
+            y -= 12
+
+    c.save()
+    return filename
