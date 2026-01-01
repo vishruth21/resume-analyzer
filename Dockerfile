@@ -1,6 +1,6 @@
 # Use an official lightweight Python image.
-# 3.11-slim is modern, faster, and standard on Streamlit Cloud.
-FROM python:3.11-slim
+# 3.10-slim as requested for deployment compatibility.
+FROM python:3.10-slim
 
 # Set working directory
 WORKDIR /app
