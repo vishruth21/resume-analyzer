@@ -4,7 +4,8 @@ from typing import List, Dict
 
 import pypdf
 import docx2txt
-from langchain_openai import ChatOpenAI
+# from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from docx import Document
@@ -109,12 +110,18 @@ def verify_optimization(original_resume: str, optimized_resume: str, plan: List[
 # LLM
 # =========================================================
 
-def get_llm(api_key: str) -> ChatOpenAI:
-    return ChatOpenAI(
-        model="gpt-4o",
-        openai_api_key=api_key,
+def get_llm(api_key: str):
+    """
+    Returns a configured Groq LLM instance.
+    """
+    if not api_key:
+        raise ValueError("Groq API Key is missing. Please check your .env or settings.")
+        
+    return ChatGroq(
+        # Defaulting to Mixtral, Groq's high-performance standard
+        model_name="mixtral-8x7b-32768", 
         temperature=0.0,
-        model_kwargs={"seed": 42}
+        groq_api_key=api_key
     )
 
 

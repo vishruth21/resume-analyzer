@@ -1,19 +1,14 @@
 import os
 from typing import List, Dict
-from langchain_openai import ChatOpenAI
+# from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import json
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def get_llm(api_key):
-    return ChatOpenAI(
-        model_name="gpt-4o",
-        openai_api_key=api_key,
-        temperature=0.0,
-        model_kwargs={"seed": 42}
-    )
+from utils import get_llm
+# Local get_llm removed to ensure single source of truth (Groq)
 
 def extract_company_names(resume_text: str) -> List[str]:
     """
